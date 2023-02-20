@@ -40,27 +40,38 @@ COPY postcss.config.js /usr/src/app/postcss.config.js
 COPY yarn.lock /usr/src/app/yarn.lock
 
 RUN apt-get update && apt-get install -y python make g++
+
+RUN apt-get clean
+
 # Run the install before copying the rest of the files
 RUN yarn config set workspaces-experimental true
-RUN yarn install --verbose
+#RUN yarn install --verbose
+RUN yarn install
 
 ENV PATH /usr/src/app/node_modules/.bin:$PATH
 ENV QUICK_BUILD true
 # ENV GENERATE_SOURCEMAP=false
 # ENV REACT_APP_CONFIG=config/default.js
 
-RUN yarn run build
+#react-vtkjs modification
+COPY index.umd.js /usr/src/app/node_modules/react-vtkjs-viewport/dist/index.umd.js
+
+#RUN yarn run build
+RUN yarn build
+
 
 # Stage 2: Bundle the built application into a Docker container
 # which runs Nginx using Alpine Linux
-FROM nginx:1.21.1-alpine
-RUN apk add --no-cache bash
-RUN rm -rf /etc/nginx/conf.d
-COPY .docker/Viewer-v2.x /etc/nginx/conf.d
-COPY .docker/Viewer-v2.x/entrypoint.sh /usr/src/
-RUN chmod 777 /usr/src/entrypoint.sh
-COPY --from=builder /usr/src/app/platform/viewer/dist /usr/share/nginx/html
-EXPOSE 80
-EXPOSE 443
-ENTRYPOINT ["/usr/src/entrypoint.sh"]
-CMD ["nginx", "-g", "daemon off;"]
+#FROM nginx:1.21.1-alpine
+#RUN apk add --no-cache bash
+#RUN rm -rf /etc/nginx/conf.d
+#COPY .docker/Viewer-v2.x /etc/nginx/conf.d
+#COPY .docker/Viewer-v2.x/entrypoint.sh /usr/src/
+#RUN chmod 777 /usr/src/entrypoint.sh
+#COPY --from=builder /usr/src/app/platform/viewer/dist /usr/share/nginx/html
+#EXPOSE 80
+#EXPOSE 443
+#ENTRYPOINT ["/usr/src/entrypoint.sh"]
+#CMD ["nginx", "-g", "daemon off;"]
+
+ENTRYPOINT ["yarn", "start"]
