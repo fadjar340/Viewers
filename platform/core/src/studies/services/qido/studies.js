@@ -48,9 +48,18 @@ function getQIDOQueryParams(filter, serverSupportsQIDOIncludeField) {
     offset: filter.offset,
     fuzzymatching: filter.fuzzymatching,
     includefield: serverSupportsQIDOIncludeField ? commaSeparatedFields : 'all',
+    StudyDate: filter.StudyDate,
   };
 
   // build the StudyDate range parameter
+  if (!filter.studyDateFrom || !filter.studyDateFrom) {
+    const current = new Date();
+    const prior = new Date().setDate(current.getDate() - 30);
+    const dateFrom = dateToString(new Date(prior));
+    const dateTo = dateToString(new Date(current));
+    parameters.StudyDate = `${dateFrom}-${dateTo}`;
+  }
+
   if (filter.studyDateFrom || filter.studyDateTo) {
     const dateFrom = dateToString(new Date(filter.studyDateFrom));
     const dateTo = dateToString(new Date(filter.studyDateTo));

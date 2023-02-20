@@ -1,5 +1,6 @@
-import React, { Component } from 'react';
-import { getImageData, loadImageData } from 'react-vtkjs-viewport';
+import React from 'react';
+import { Component } from 'react';
+import { getImageData, loadImageData, View3D } from 'react-vtkjs-viewport';
 import ConnectedVTKViewport from './ConnectedVTKViewport';
 import LoadingIndicator from './LoadingIndicator.js';
 import OHIF from '@ohif/core';
@@ -10,10 +11,16 @@ import vtkDataArray from 'vtk.js/Sources/Common/Core/DataArray';
 import vtkImageData from 'vtk.js/Sources/Common/DataModel/ImageData';
 import vtkVolume from 'vtk.js/Sources/Rendering/Core/Volume';
 import vtkVolumeMapper from 'vtk.js/Sources/Rendering/Core/VolumeMapper';
+import vtkColorTransferFunction from 'vtk.js/Sources/Rendering/Core/ColorTransferFunction';
+import vtkPiecewiseFunction from 'vtk.js/Sources/Common/DataModel/PiecewiseFunction';
+import presets from './presets.js';
 
 const segmentationModule = cornerstoneTools.getModule('segmentation');
 
 const { StackManager } = OHIF.utils;
+
+//const SOPInstanceUID = '00080018';
+//const SERIES_INSTANCE_UID = '0020000E';
 
 // TODO: Figure out where we plan to put this long term
 const volumeCache = {};
@@ -45,13 +52,15 @@ function createLabelMapImageData(backgroundImageData) {
   return labelMapData;
 } */
 
-class OHIFVTKViewport extends Component {
+class OHIFVTKViewport3D extends Component {
   state = {
     volumes: null,
     paintFilterLabelMapImageData: null,
     paintFilterBackgroundImageData: null,
     percentComplete: 0,
-    isLoaded: false,
+    isLoaded: true,
+    ctTransferFunctionPresetId: 'vtkMRMLVolumePropertyNode4',
+    petColorMapId: 'hsv',
   };
 
   static propTypes = {
@@ -62,27 +71,29 @@ class OHIFVTKViewport extends Component {
         displaySetInstanceUID: PropTypes.string.isRequired,
         sopClassUIDs: PropTypes.arrayOf(PropTypes.string),
         SOPInstanceUID: PropTypes.string,
+        SeriesInstanceUID: PropTypes.string,
+        imageIds: PropTypes.string,
         frameIndex: PropTypes.number,
       }),
     }),
-    viewportIndex: PropTypes.number.isRequired,
+    viewportIndex: PropTypes.number,
     children: PropTypes.node,
     onScroll: PropTypes.func,
-    servicesManager: PropTypes.object.isRequired,
+    servicesManager: PropTypes.object,
   };
 
   static defaultProps = {
-    onScroll: () => { },
+    onScroll: () => {},
   };
 
-  static id = 'OHIFVTKViewport';
+  static id = 'OHIFVTKViewport3D';
 
   static init() {
-    console.log('OHIFVTKViewport init()');
+    console.log('OHIFVTKViewport3D init()');
   }
 
   static destroy() {
-    console.log('OHIFVTKViewport destroy()');
+    console.log('OHIFVTKViewport3D destroy()');
     StackManager.clearStacks();
   }
 
@@ -91,6 +102,8 @@ class OHIFVTKViewport extends Component {
     StudyInstanceUID,
     displaySetInstanceUID,
     SOPInstanceUID,
+    SeriesInstanceUID,
+    imageIds,
     frameIndex
   ) {
     // Create shortcut to displaySet
@@ -123,7 +136,34 @@ class OHIFVTKViewport extends Component {
       if (index > -1) {
         stack.currentImageIdIndex = index;
       }
-    } else {
+    } else if (SeriesInstanceUID) {
+      const index = stack.imageIds.findIndex(imageId => {
+        const imageIdSeriesInstanceUID = cornerstone.metaData.get(
+          'SeriesInstanceUID',
+          imageId
+        );
+
+        return imageIdSeriesInstanceUID === SeriesInstanceUID;
+      });
+
+      if (index > -1) {
+        stack.currentImageIdIndex = index;
+      }
+    }
+    else if (imageIds) {
+      const index = stack.imageIds.findIndex(imageId => {
+        const imageIdimageId = cornerstone.metaData.get(
+          imageId
+        );
+
+        return imageIdimageId === imageId;
+      });
+
+      if (index > -1) {
+        stack.currentImageIdIndex = index;
+      }
+    }
+    else {
       stack.currentImageIdIndex = 0;
     }
 
@@ -136,17 +176,20 @@ class OHIFVTKViewport extends Component {
     displaySetInstanceUID,
     SOPClassUID,
     SOPInstanceUID,
+    SeriesInstanceUID,
+    imageIds,
     frameIndex
   ) => {
-
     const { UINotificationService } = this.props.servicesManager.services;
 
-    const stack = OHIFVTKViewport.getCornerstoneStack(
+    const stack = OHIFVTKViewport3D.getCornerstoneStack(
       studies,
       StudyInstanceUID,
       displaySetInstanceUID,
       SOPClassUID,
       SOPInstanceUID,
+      SeriesInstanceUID,
+      imageIds,
       frameIndex
     );
 
@@ -233,7 +276,7 @@ class OHIFVTKViewport extends Component {
    * @param {string} imageDataObject.imageMetaData0.Modality - CT, MR, PT, etc
    * @param {string} displaySetInstanceUID
    * @returns vtkVolumeActor
-   * @memberof OHIFVTKViewport
+   * @memberof OHIFVTKViewport3D
    */
   getOrCreateVolume(imageDataObject, displaySetInstanceUID) {
     if (volumeCache[displaySetInstanceUID]) {
@@ -281,13 +324,176 @@ class OHIFVTKViewport extends Component {
     return volumeActor;
   }
 
-  setStateFromProps() {
-    const { studies, displaySet } = this.props.viewportData;
-    const {
-      StudyInstanceUID,
+  getShiftRange(colorTransferArray) {
+    // Credit to paraview-glance
+    // https://github.com/Kitware/paraview-glance/blob/3fec8eeff31e9c19ad5b6bff8e7159bd745e2ba9/src/components/controls/ColorBy/script.js#L133
+
+    // shift range is original rgb/opacity range centered around 0
+    let min = Infinity;
+    let max = -Infinity;
+    for (let i = 0; i < colorTransferArray.length; i += 4) {
+      min = Math.min(min, colorTransferArray[i]);
+      max = Math.max(max, colorTransferArray[i]);
+    }
+
+    const center = (max - min) / 2;
+
+    return {
+      shiftRange: [-center, center],
+      min,
+      max,
+    };
+  }
+
+  applyPointsToPiecewiseFunction(points, range, pwf) {
+    const width = range[1] - range[0];
+    const rescaled = points.map(([x, y]) => [x * width + range[0], y]);
+
+      pwf.removeAllPoints();
+      rescaled.forEach(([x, y]) => pwf.addPoint(x, y));
+
+    return rescaled;
+  }
+
+  applyPointsToRGBFunction(points, range, cfun) {
+    const width = range[1] - range[0];
+    const rescaled = points.map(([x, r, g, b]) => [
+      x * width + range[0],
+      r,
+      g,
+      b,
+    ]);
+
+    cfun.removeAllPoints();
+    rescaled.forEach(([x, r, g, b]) => cfun.addRGBPoint(x, r, g, b));
+
+    return rescaled;
+  }
+
+  applyPreset(volumeActor, preset) {
+    // Create color transfer function
+    const colorTransferArray = preset.colorTransfer
+      .split(' ')
+      .splice(1)
+      .map(parseFloat);
+
+    const { shiftRange } = getShiftRange(colorTransferArray);
+    let min = shiftRange[0];
+    const width = shiftRange[1] - shiftRange[0];
+    const cfun = vtkColorTransferFunction.newInstance();
+    const normColorTransferValuePoints = [];
+    for (let i = 0; i < colorTransferArray.length; i += 4) {
+      let value = colorTransferArray[i];
+      const r = colorTransferArray[i + 1];
+      const g = colorTransferArray[i + 2];
+      const b = colorTransferArray[i + 3];
+
+      value = (value - min) / width;
+      normColorTransferValuePoints.push([value, r, g, b]);
+    }
+
+    applyPointsToRGBFunction(normColorTransferValuePoints, shiftRange, cfun);
+
+    volumeActor.getProperty().setRGBTransferFunction(0, cfun);
+
+    // Create scalar opacity function
+    const scalarOpacityArray = preset.scalarOpacity
+      .split(' ')
+      .splice(1)
+      .map(parseFloat);
+
+    const ofun = vtkPiecewiseFunction.newInstance();
+    const normPoints = [];
+    for (let i = 0; i < scalarOpacityArray.length; i += 2) {
+      let value = scalarOpacityArray[i];
+      const opacity = scalarOpacityArray[i + 1];
+
+      value = (value - min) / width;
+
+      normPoints.push([value, opacity]);
+    }
+
+    applyPointsToPiecewiseFunction(normPoints, shiftRange, ofun);
+
+    volumeActor.getProperty().setScalarOpacity(0, ofun);
+
+    const [
+      gradientMinValue,
+      gradientMinOpacity,
+      gradientMaxValue,
+      gradientMaxOpacity,
+    ] = preset.gradientOpacity
+      .split(' ')
+      .splice(1)
+      .map(parseFloat);
+
+    volumeActor.getProperty().setUseGradientOpacity(0, true);
+    volumeActor.getProperty().setGradientOpacityMinimumValue(0, gradientMinValue);
+    volumeActor.getProperty().setGradientOpacityMinimumOpacity(0, gradientMinOpacity);
+    volumeActor.getProperty().setGradientOpacityMaximumValue(0, gradientMaxValue);
+    volumeActor.getProperty().setGradientOpacityMaximumOpacity(0, gradientMaxOpacity);
+
+    if (preset.interpolation === '1') {
+      volumeActor.getProperty().setInterpolationTypeToFastLinear();
+      //volumeActor.getProperty().setInterpolationTypeToLinear()
+    }
+
+    const ambient = parseFloat(preset.ambient);
+    //const shade = preset.shade === '1'
+    const diffuse = parseFloat(preset.diffuse);
+    const specular = parseFloat(preset.specular);
+    const specularPower = parseFloat(preset.specularPower);
+
+    //volumeActor.getProperty().setShade(shade)
+    volumeActor.getProperty().setAmbient(ambient);
+    volumeActor.getProperty().setDiffuse(diffuse);
+    volumeActor.getProperty().setSpecular(specular);
+    volumeActor.getProperty().setSpecularPower(specularPower);
+  }
+
+  createCT3dPipeline(imageDataObject, ctTransferFunctionPresetId) {
+    const { volumeActor, mapper } = createActorMapper(imageDataObject);
+
+    const sampleDistance =
+      1.2 *
+      Math.sqrt(
+        imageDataObject
+          .getSpacing()
+          .map(v => v * v)
+          .reduce((a, b) => a + b, 0)
+      );
+
+    const range = imageDataObject
+      .getPointData()
+      .getScalars()
+      .getRange();
+    volumeActor
+      .getProperty()
+      .getRGBTransferFunction(0)
+      .setRange(range[0], range[1]);
+
+    mapper.setSampleDistance(sampleDistance);
+
+    const preset = presets.find(
+      preset => preset.id === ctTransferFunctionPresetId
+    );
+
+    applyPreset(volumeActor, preset);
+
+    volumeActor.getProperty().setScalarOpacityUnitDistance(0, 2.5);
+
+    return volumeActor;
+  }
+
+    setStateFromProps() {
+      const { studies } = this.getViewportData;
+      const {
+        StudyInstanceUID,
       displaySetInstanceUID,
       sopClassUIDs,
       SOPInstanceUID,
+      SeriesInstanceUID,
+      imageIds,
       frameIndex,
     } = displaySet;
 
@@ -308,6 +514,7 @@ class OHIFVTKViewport extends Component {
       patientName: study.patientName,
       patientId: study.patientId,
       seriesNumber: String(displaySet.seriesNumber),
+      imageIds: displaySet.imageIds,
       seriesDescription: displaySet.seriesDescription,
     };
 
@@ -321,6 +528,8 @@ class OHIFVTKViewport extends Component {
         StudyInstanceUID,
         displaySetInstanceUID,
         SOPInstanceUID,
+        SeriesInstanceUID,
+        imageIds,
         frameIndex
       );
 
@@ -335,8 +544,12 @@ class OHIFVTKViewport extends Component {
         imageDataObject,
         displaySetInstanceUID
       );
+      const ctVolVR = createCT3dPipeline(
+        volumeActor,
+        this.state.ctTransferFunctionPresetId
+      );
 
-      this.setState(
+      this.setStateFromProps(
         {
           percentComplete: 0,
           dataDetails,
@@ -349,10 +562,12 @@ class OHIFVTKViewport extends Component {
           // Will render _something_ before the volumes are set and the volume
           // Construction that happens in react-vtkjs-viewport locks up the CPU.
           setTimeout(() => {
-            this.setState({
-              volumes: [volumeActor],
+            this.setStateFromProps({
+              volumes: [ctVolVR],
               paintFilterLabelMapImageData: labelmapDataObject,
               paintFilterBackgroundImageData: imageDataObject.vtkImageData,
+              ctTransferFunctionPresetId,
+              petColorMapId,
               labelmapColorLUT,
             });
           }, 200);
@@ -376,7 +591,7 @@ class OHIFVTKViewport extends Component {
           type: 'error',
           autoClose: false,
           action: {
-            label: 'Exit 2D MPR',
+            label: 'Exit 3D MPR',
             onClick: ({ close }) => {
               // context: 'ACTIVE_VIEWPORT::VTK',
               close();
@@ -385,13 +600,43 @@ class OHIFVTKViewport extends Component {
           },
         });
       }
-      this.setState({ isLoaded: true });
+      this.setStateFromProps({ isLoaded: false });
     }
   }
 
   componentDidMount() {
-    this.setStateFromProps();
+   this.setStateFromProps();
   }
+
+
+  handleChangeCTTransferFunction = event => {
+    const ctTransferFunctionPresetId = event.target.value;
+    const preset = presets.find(
+      preset => preset.id === ctTransferFunctionPresetId
+    );
+
+    const volumeActor = this.state.volumes[0];
+
+    applyPreset(volumeActor, preset);
+
+    this.rerenderAll();
+
+    this.setStateFromProps({
+      ctTransferFunctionPresetId,
+    });
+  };
+
+  rerenderAll = () => {
+    // Update all render windows, since the automatic re-render might not
+    // happen if the viewport is not currently using the painting widget
+    Object.keys(this.apis).forEach(viewportIndex => {
+      const renderWindow = this.apis[
+        viewportIndex
+      ].genericRenderWindow.getRenderWindow();
+
+      renderWindow.render();
+    });
+  };
 
   componentDidUpdate(prevProps, prevState) {
     const { displaySet } = this.props.viewportData;
@@ -414,7 +659,7 @@ class OHIFVTKViewport extends Component {
     const { isLoading, imageIds } = imageDataObject;
 
     if (!isLoading) {
-      this.setState({ isLoaded: true });
+      this.setState({ isLoaded: false });
       return;
     }
 
@@ -430,7 +675,15 @@ class OHIFVTKViewport extends Component {
           percentComplete,
         });
       }
+
+      if (percentComplete % 20 === 0) {
+        this.rerenderAll();
+      }
     };
+
+//    const onAllPixelDataInsertedCallback = () => {
+//      this.rerenderAll();
+//    };
 
     const onPixelDataInsertedErrorCallback = error => {
       const {
@@ -484,44 +737,72 @@ class OHIFVTKViewport extends Component {
 
     const style = { width: '100%', height: '100%', position: 'relative' };
 
-    return (
-      <>
-        <div style={style}>
-          {!this.state.isLoaded && (
-            <LoadingIndicator percentComplete={this.state.percentComplete} />
-          )}
-          {this.state.volumes && (
-            <ConnectedVTKViewport
-              volumes={this.state.volumes}
-              paintFilterLabelMapImageData={
-                this.state.paintFilterLabelMapImageData
-              }
-              paintFilterBackgroundImageData={
-                this.state.paintFilterBackgroundImageData
-              }
-              viewportIndex={this.props.viewportIndex}
-              dataDetails={this.state.dataDetails}
-              labelmapRenderingOptions={{
-                colorLUT: this.state.labelmapColorLUT,
-                globalOpacity: configuration.fillAlpha,
-                visible: configuration.renderFill,
-                outlineThickness: configuration.outlineWidth,
-                renderOutline: configuration.renderOutline,
-                segmentsDefaultProperties: this.segmentsDefaultProperties,
-                onNewSegmentationRequested: () => {
-                  this.setStateFromProps();
-                },
-              }}
-              onScroll={this.props.onScroll}
-              />
-              )}
-            </div>
+    const ctTransferFunctionPresetOptions = presets.map(preset => {
+      return (
+        <option key={preset.id} value={preset.id}>
+          {preset.name}
+        </option>
+      );
+    });
 
-            {childrenWithProps}
-          </>
-        );
-      }
+    const { percentComplete } = this.state;
+
+    const progressString = `Progress: ${percentComplete}%`;
+
+   return (
+    <div style={style}>
+    {!this.state.isLoaded && (
+      <LoadingIndicator percentComplete={this.state.percentComplete} />
+    )}
+    {this.state.volumes && (
+      <ConnectedVTKViewport
+        volumes={this.state.volumes}
+        paintFilterLabelMapImageData={
+          this.state.paintFilterLabelMapImageData
+        }
+        paintFilterBackgroundImageData={
+          this.state.paintFilterBackgroundImageData
+        }
+        viewportIndex={this.props.viewportIndex}
+        dataDetails={this.state.dataDetails}
+        labelmapRenderingOptions={{
+          colorLUT: this.state.labelmapColorLUT,
+          globalOpacity: configuration.fillAlpha,
+          visible: configuration.renderFill,
+          outlineThickness: configuration.outlineWidth,
+          renderOutline: configuration.renderOutline,
+          segmentsDefaultProperties: this.segmentsDefaultProperties,
+          onNewSegmentationRequested: () => {
+            this.setStateFromProps();
+          },
+        }}
+        onScroll={this.props.onScroll}
+        />
+        )}
+          <div className="row">
+          <div className="col-xs-12">
+            <div>
+              <select
+                id="select_CT_xfer_fn"
+                value={this.state.ctTransferFunctionPresetId}
+                onChange={this.handleChangeCTTransferFunction}
+              >
+                {ctTransferFunctionPresetOptions}
+              </select>
+            </div>
+          </div>
+          <div className="col-xs-12 col-sm-6">
+            <View3D 
+              volumes={this.state.volumes}
+              //onCreated={this.saveApiReference}
+            />
+          </div>
+        </div>
+      </div>
+      );
     }
+
+}
 
 /**
  * Takes window levels and converts them to a range (lower/upper)
@@ -549,6 +830,7 @@ function _getRangeFromWindowLevels(width, center, Modality = undefined) {
     lower: center - width / 2.0,
     upper: center + width / 2.0,
   };
-}
+ }
 
-export default OHIFVTKViewport;
+
+export default OHIFVTKViewport3D;

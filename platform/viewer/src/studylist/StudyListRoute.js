@@ -1,26 +1,27 @@
-import React, { useState, useEffect, useContext } from 'react';
-import PropTypes from 'prop-types';
 import OHIF from '@ohif/core';
-import { withRouter } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import {
-  StudyList,
   PageToolbar,
+  StudyList,
   TablePagination,
   useDebounce,
   useMedia,
 } from '@ohif/ui';
-import ConnectedHeader from '../connectedComponents/ConnectedHeader.js';
-import * as RoutesUtil from '../routes/routesUtil';
 import moment from 'moment';
+import PropTypes from 'prop-types';
+import React, { useContext, useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { withRouter } from 'react-router-dom';
+import ConnectedHeader from '../connectedComponents/ConnectedHeader.js';
 import ConnectedDicomFilesUploader from '../googleCloud/ConnectedDicomFilesUploader';
 import ConnectedDicomStorePicker from '../googleCloud/ConnectedDicomStorePicker';
 import filesToStudies from '../lib/filesToStudies.js';
+import * as RoutesUtil from '../routes/routesUtil';
 
 // Contexts
+import AppContext from '../context/AppContext';
 import UserManagerContext from '../context/UserManagerContext';
 import WhiteLabelingContext from '../context/WhiteLabelingContext';
-import AppContext from '../context/AppContext';
+import Studies from '../../../core/src/studies/services/qido/studies.js';
 
 const { urlUtil: UrlUtil } = OHIF.utils;
 
@@ -349,6 +350,7 @@ async function getStudyList(
     limit: rowsPerPage,
     offset: pageNumber * rowsPerPage,
     fuzzymatching: server.supportsFuzzyMatching === true,
+    StudyDate: filters.StudyDate,
   };
 
   const studies = await _fetchStudies(server, mappedFilters, displaySize, {

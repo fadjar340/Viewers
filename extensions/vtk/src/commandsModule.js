@@ -6,12 +6,18 @@ import {
   vtkInteractorStyleMPRRotate,
 } from 'react-vtkjs-viewport';
 import { getImageData } from 'react-vtkjs-viewport';
+
 import { vec3 } from 'gl-matrix';
 import setMPRLayout from './utils/setMPRLayout.js';
 import setViewportToVTK from './utils/setViewportToVTK.js';
 import Constants from 'vtk.js/Sources/Rendering/Core/VolumeMapper/Constants.js';
 import OHIFVTKViewport from './OHIFVTKViewport';
-
+import Render3D from './Render3D.js';
+import cornerstone from 'cornerstone-core';
+import React from 'react';
+import * as ReactDOM from 'react-dom';
+//import VTKFusionExample from './VTKVolumeRenderingExample';
+import OHIFVTKViewport3D from './OHIFVTKViewport3D';
 const { BlendMode } = Constants;
 
 const commandsModule = ({ commandsManager, servicesManager }) => {
@@ -271,7 +277,7 @@ const commandsModule = ({ commandsManager, servicesManager }) => {
       });
       await Promise.all(promises);
     },
-    enableRotateTool: () => {
+   /* enableRotateTool: () => {
       apis.forEach((api, apiIndex) => {
         const istyle = vtkInteractorStyleMPRRotate.newInstance();
 
@@ -280,7 +286,7 @@ const commandsModule = ({ commandsManager, servicesManager }) => {
           configuration: { apis, apiIndex, uid: api.uid },
         });
       });
-    },
+    },*/
     enableCrosshairsTool: () => {
       apis.forEach((api, apiIndex) => {
         const istyle = vtkInteractorStyleRotatableMPRCrosshairs.newInstance();
@@ -487,6 +493,33 @@ const commandsModule = ({ commandsManager, servicesManager }) => {
         }
       }
     },
+    render: async ({ viewports }) => {
+      // TODO push a lot of this backdoor logic lower down to the library level.
+      const displaySet =
+        viewports.viewportSpecificData[viewports.activeViewportIndex];
+
+      const viewportProps = [
+        {
+          orientation: {
+            sliceNormal: [0, 0, 1],
+            viewUp: [0, -1, 0],
+          },
+        },
+      ];
+      try {
+        apis = await setMPRLayout(displaySet, viewportProps, 1, 1);
+      } catch (error) {
+        throw new Error(error);
+      }
+
+        const vistaActivada = Array.from(
+        document.getElementsByClassName('vtk-viewport-handler')
+      );
+
+      vistaActivada[0].innerHTML = '';
+      ReactDOM.render(<Render3D />, vistaActivada[0]);
+      //Render3D.button(false);
+    },
   };
 
   window.vtkActions = actions;
@@ -584,6 +617,12 @@ const commandsModule = ({ commandsManager, servicesManager }) => {
     },
     getVtkApiForViewportIndex: {
       commandFn: actions.getVtkApis,
+      context: 'VIEWER',
+    },
+    render: {
+      commandFn: actions.render,
+      storeContexts: ['viewports'],
+      options: {},
       context: 'VIEWER',
     },
   };

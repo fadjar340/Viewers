@@ -15,13 +15,31 @@ window.config = {
     displayProgress: true,
     includeActiveDisplaySet: true,
   },
+  oidc: {
+    // Configuring Keycloak as an OpenID Connect provider
+    authority: 'https://keycloak.ecalyptus.healthcare/realms/ohif',
+    client_id: 'ohif',
+    scope: 'openid profile email',
+    response_type: 'code',
+    // Configuring the access token and refresh token to be stored in cookies
+    token_type: 'Bearer',
+    loadUserInfo: true,
+    // Configuring the token endpoint to retrieve tokens from Keycloak
+    token_endpoint: 'https://keycloak.ecalyptus.healthcare/realms/ohif/protocol/openid-connect/token',
+    userinfo_endpoint: 'https://keycloak.ecalyptus.healthcare/realms/ohif/protocol/openid-connect/userinfo',
+    end_session_endpoint: 'https://ykeycloak.ecalyptus.healthcare/realms/ohif/protocol/openid-connect/logout',
+    check_session_iframe: 'https://keycloak.ecalyptus.healthcare/realms/ohif/protocol/openid-connect/login-status-iframe.html',
+    client_secret: 'C3RhLku4k0fWGJ25qW7PnpZMCOLKrwcz',
+    // Configuring the redirect URI to be the OHIF Viewer URL
+    redirect_uri: 'http://ohif.ecalyptus.healthcare/viewer/login'
+  },
   servers: {
     dicomWeb: [
       {
         name: 'DCM4CHEE',
-        wadoUriRoot: 'https://server.dcmjs.org/dcm4chee-arc/aets/DCM4CHEE/wado',
-        qidoRoot: 'https://server.dcmjs.org/dcm4chee-arc/aets/DCM4CHEE/rs',
-        wadoRoot: 'https://server.dcmjs.org/dcm4chee-arc/aets/DCM4CHEE/rs',
+        wadoUriRoot: 'https://dcm4che.ecalyptus.healthcare/dcm4chee-arc/aets/DCM4CHEE/wado',
+        qidoRoot: 'https://dcm4che.ecalyptus.healthcare/dcm4chee-arc/aets/DCM4CHEE/rs',
+        wadoRoot: 'https://dcm4che.ecalyptus.healthcare/aets/DCM4CHEE/rs',
         qidoSupportsIncludeField: true,
         imageRendering: 'wadors',
         thumbnailRendering: 'wadors',

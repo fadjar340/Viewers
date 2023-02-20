@@ -250,6 +250,7 @@ function TableRow(props) {
     >
       <td className={classNames({ 'empty-value': !PatientName })}>
         {PatientName || `(${t('Empty')})`}
+        <div style={{ color: '#60656f' }}>{PatientID}</div>
       </td>
       <td>{PatientID}</td>
       <td>{AccessionNumber}</td>
